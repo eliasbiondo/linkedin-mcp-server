@@ -1,0 +1,93 @@
+# ==============================
+# Python
+# ==============================
+
+# Byte-compiled / optimized / DLL files
+__pycache__/
+*.py[cod]
+*$py.class
+
+# C extensions
+*.so
+
+# ==============================
+# Distribution / Packaging
+# ==============================
+
+build/
+dist/
+wheels/
+*.egg-info/
+*.egg
+sdist/
+.eggs/
+
+# ==============================
+# Virtual Environments
+# ==============================
+
+.venv/
+.env/
+env/
+venv/
+
+# ==============================
+# uv
+# ==============================
+
+# uv cache (usually global, but just in case)
+.uv_cache/
+
+# ==============================
+# Testing / Coverage
+# ==============================
+
+.pytest_cache/
+.coverage
+.coverage.*
+htmlcov/
+.tox/
+.nox/
+
+# ==============================
+# Type Checking / Linting
+# ==============================
+
+.mypy_cache/
+.pytype/
+.ruff_cache/
+
+# ==============================
+# IDEs & Editors
+# ==============================
+
+# VS Code
+.vscode/
+
+# JetBrains (PyCharm, etc.)
+.idea/
+
+# ==============================
+# OS Files
+# ==============================
+
+# macOS
+.DS_Store
+
+# Windows
+Thumbs.db
+
+# ==============================
+# Environment Variables
+# ==============================
+
+.env
+.env.*
+!.env.example
+
+# ==============================
+# Project-specific
+# ==============================
+
+# Development scratch directory
+_/
