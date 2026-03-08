@@ -68,7 +68,21 @@ cd linkedin-mcp-server
 uv sync
 ```
 
-### 2. Authenticate with LinkedIn
+### 2. Install browser
+
+This project uses [Patchright](https://github.com/Kaliiiiiiiiii-Vinyzu/patchright) (a patched fork of Playwright) for browser automation. You need to install the browser binaries before first use:
+
+```bash
+uv run patchright install
+```
+
+> **Windows users:** If the command above fails with `program not found`, run instead:
+>
+> ```powershell
+> uv run python -m patchright install
+> ```
+
+### 3. Authenticate with LinkedIn
 
 ```bash
 uv run linkedin-mcp-server --login
@@ -76,7 +90,7 @@ uv run linkedin-mcp-server --login
 
 A browser window will open. Log in to LinkedIn and the session will be persisted locally at `~/.linkedin-mcp-server/browser-data`.
 
-### 3. Run the server
+### 4. Run the server
 
 **stdio transport** (default — for Claude Desktop, Cursor, and similar clients):
 
