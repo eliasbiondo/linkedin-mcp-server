@@ -161,7 +161,7 @@ class PatchrightBrowserAdapter(BrowserPort):
             raise NetworkError(f"Navigation failed: {url}") from e
 
         try:
-            await page.wait_for_selector('[role="dialog"]', timeout=5000)
+            await page.wait_for_selector('[role="dialog"]', timeout=10000)
         except Exception:
             logger.warning("Overlay dialog not found for %s", url)
 

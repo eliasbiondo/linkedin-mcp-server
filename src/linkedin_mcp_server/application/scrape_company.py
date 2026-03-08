@@ -43,6 +43,7 @@ class ScrapeCompanyUseCase:
 
         base_url = f"https://www.linkedin.com/company/{company_name}"
         parsed_sections: dict[str, Any] = {}
+        failed_sections: dict[str, str] = {}
 
         first = True
         for section_name, section_config in COMPANY_SECTIONS.items():
@@ -54,7 +55,18 @@ class ScrapeCompanyUseCase:
             first = False
 
             url = base_url + section_config.url_suffix
-            content = await self._browser.extract_page_html(url)
+
+            try:
+                content = await self._browser.extract_page_html(url)
+            except Exception as e:
+                logger.warning(
+                    "Failed to scrape section '%s' for %s: %s",
+                    section_name,
+                    company_name,
+                    e,
+                )
+                failed_sections[section_name] = str(e)
+                continue
 
             if content.html:
                 try:
@@ -77,4 +89,5 @@ class ScrapeCompanyUseCase:
             url=f"{base_url}/",
             sections=parsed_sections,
             unknown_sections=unknown,
+            failed_sections=failed_sections,
         )

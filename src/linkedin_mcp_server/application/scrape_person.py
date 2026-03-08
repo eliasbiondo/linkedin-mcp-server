@@ -43,6 +43,7 @@ class ScrapePersonUseCase:
 
         base_url = f"https://www.linkedin.com/in/{username}"
         parsed_sections: dict[str, Any] = {}
+        failed_sections: dict[str, str] = {}
 
         first = True
         for section_name, section_config in PERSON_SECTIONS.items():
@@ -55,10 +56,20 @@ class ScrapePersonUseCase:
 
             url = base_url + section_config.url_suffix
 
-            if section_config.is_overlay:
-                content = await self._browser.extract_overlay_html(url)
-            else:
-                content = await self._browser.extract_page_html(url)
+            try:
+                if section_config.is_overlay:
+                    content = await self._browser.extract_overlay_html(url)
+                else:
+                    content = await self._browser.extract_page_html(url)
+            except Exception as e:
+                logger.warning(
+                    "Failed to scrape section '%s' for %s: %s",
+                    section_name,
+                    username,
+                    e,
+                )
+                failed_sections[section_name] = str(e)
+                continue
 
             if content.html:
                 try:
@@ -81,4 +92,5 @@ class ScrapePersonUseCase:
             url=f"{base_url}/",
             sections=parsed_sections,
             unknown_sections=unknown,
+            failed_sections=failed_sections,
         )
