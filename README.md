@@ -2,6 +2,9 @@
 
 A [Model Context Protocol](https://modelcontextprotocol.io/) (MCP) server for LinkedIn. Search people, companies, and jobs, scrape profiles, and retrieve structured JSON data from any MCP-compatible AI client.
 
+https://github.com/user-attachments/assets/50cd8629-41ee-4261-9538-40dc7d30294e
+
+
 Built with [FastMCP](https://github.com/PrefectHQ/fastmcp), [Patchright](https://github.com/Kaliiiiiiiiii-Vinyzu/patchright), and a clean hexagonal architecture.
 
 ---
