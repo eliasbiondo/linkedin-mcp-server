@@ -6,6 +6,7 @@ rate limit detection, and HTML extraction.
 
 import asyncio
 import logging
+import random
 from pathlib import Path
 
 from patchright.async_api import (
@@ -31,6 +32,18 @@ _RATE_LIMIT_MARKERS = [
     "too many requests",
 ]
 
+# Realistic Chrome user agents — one is picked randomly per session
+# when no custom user_agent is configured.
+_UA_CHROME = "AppleWebKit/537.36 (KHTML, like Gecko)"
+_USER_AGENT_POOL = [
+    f"Mozilla/5.0 (Windows NT 10.0; Win64; x64) {_UA_CHROME} Chrome/131.0.0.0 Safari/537.36",
+    f"Mozilla/5.0 (Macintosh; Intel Mac OS X 10_15_7) {_UA_CHROME} Chrome/131.0.0.0 Safari/537.36",
+    f"Mozilla/5.0 (Windows NT 10.0; Win64; x64) {_UA_CHROME} Chrome/130.0.0.0 Safari/537.36",
+    f"Mozilla/5.0 (Macintosh; Intel Mac OS X 10_15_7) {_UA_CHROME} Chrome/130.0.0.0 Safari/537.36",
+    f"Mozilla/5.0 (X11; Linux x86_64) {_UA_CHROME} Chrome/131.0.0.0 Safari/537.36",
+    f"Mozilla/5.0 (X11; Linux x86_64) {_UA_CHROME} Chrome/130.0.0.0 Safari/537.36",
+]
+
 
 class PatchrightBrowserAdapter(BrowserPort):
     """BrowserPort implementation using Patchright persistent browser."""
@@ -51,6 +64,12 @@ class PatchrightBrowserAdapter(BrowserPort):
 
         user_data_dir = str(Path(self._config.user_data_dir).expanduser())
 
+        # Use configured user agent or pick a random realistic one
+        user_agent = self._config.user_agent or random.choice(
+            _USER_AGENT_POOL
+        )
+        logger.info("Using user agent: %s", user_agent)
+
         launch_args: dict = {
             "headless": self._config.headless,
             "slow_mo": self._config.slow_mo,
@@ -59,15 +78,20 @@ class PatchrightBrowserAdapter(BrowserPort):
         if self._config.chrome_path:
             launch_args["executable_path"] = self._config.chrome_path
 
-        self._context = await self._playwright.chromium.launch_persistent_context(
-            user_data_dir,
-            **launch_args,
-            viewport={"width": self._config.viewport_width, "height": self._config.viewport_height},
-            user_agent=self._config.user_agent,
-            args=[
-                "--disable-blink-features=AutomationControlled",
-                "--no-sandbox",
-            ],
+        self._context = (
+            await self._playwright.chromium.launch_persistent_context(
+                user_data_dir,
+                **launch_args,
+                viewport={
+                    "width": self._config.viewport_width,
+                    "height": self._config.viewport_height,
+                },
+                user_agent=user_agent,
+                args=[
+                    "--disable-blink-features=AutomationControlled",
+                    "--no-sandbox",
+                ],
+            )
         )
 
         pages = self._context.pages
@@ -81,10 +105,26 @@ class PatchrightBrowserAdapter(BrowserPort):
 
     async def navigate(self, url: str, wait_until: str = "domcontentloaded") -> None:
         page = await self._ensure_browser()
-        try:
-            await page.goto(url, wait_until=wait_until)  # type: ignore[arg-type]
-        except Exception as e:
-            raise NetworkError(f"Navigation failed: {url}") from e
+        last_error: Exception | None = None
+
+        for attempt in range(1, 4):
+            try:
+                await page.goto(url, wait_until=wait_until)
+                return
+            except Exception as e:
+                last_error = e
+                logger.warning(
+                    "Navigation attempt %d/3 failed for %s: %s",
+                    attempt,
+                    url,
+                    e,
+                )
+                if attempt < 3:
+                    await asyncio.sleep(attempt * 2)
+
+        raise NetworkError(
+            f"Navigation failed after 3 attempts: {url}"
+        ) from last_error
 
     async def extract_page_html(self, url: str) -> PageContent:
         """Navigate, scroll, extract <main> innerHTML."""
@@ -93,6 +133,7 @@ class PatchrightBrowserAdapter(BrowserPort):
         try:
             await page.goto(url, wait_until="domcontentloaded")
         except Exception as e:
+            logger.error("Page navigation failed for %s: %s", url, e)
             raise NetworkError(f"Navigation failed: {url}") from e
 
         await self._detect_rate_limit(page)
@@ -116,6 +157,7 @@ class PatchrightBrowserAdapter(BrowserPort):
         try:
             await page.goto(url, wait_until="domcontentloaded")
         except Exception as e:
+            logger.error("Overlay navigation failed for %s: %s", url, e)
             raise NetworkError(f"Navigation failed: {url}") from e
 
         try:
@@ -139,6 +181,7 @@ class PatchrightBrowserAdapter(BrowserPort):
         try:
             await page.goto(url, wait_until="domcontentloaded")
         except Exception as e:
+            logger.error("Search page navigation failed for %s: %s", url, e)
             raise NetworkError(f"Navigation failed: {url}") from e
 
         await self._detect_rate_limit(page)
