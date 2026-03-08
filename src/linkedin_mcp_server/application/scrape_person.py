@@ -4,6 +4,11 @@ import asyncio
 import logging
 from typing import Any
 
+from linkedin_mcp_server.domain.exceptions import (
+    AuthenticationError,
+    NetworkError,
+    RateLimitError,
+)
 from linkedin_mcp_server.domain.models.responses import ScrapeResponse
 from linkedin_mcp_server.domain.parsers import (
     PERSON_SECTIONS,
@@ -43,6 +48,7 @@ class ScrapePersonUseCase:
 
         base_url = f"https://www.linkedin.com/in/{username}"
         parsed_sections: dict[str, Any] = {}
+        failed_sections: dict[str, str] = {}
 
         first = True
         for section_name, section_config in PERSON_SECTIONS.items():
@@ -55,30 +61,52 @@ class ScrapePersonUseCase:
 
             url = base_url + section_config.url_suffix
 
-            if section_config.is_overlay:
-                content = await self._browser.extract_overlay_html(url)
-            else:
-                content = await self._browser.extract_page_html(url)
+            try:
+                if section_config.is_overlay:
+                    content = await self._browser.extract_overlay_html(url)
+                else:
+                    content = await self._browser.extract_page_html(url)
+            except (RateLimitError, AuthenticationError, NetworkError):
+                raise
+            except Exception as e:
+                logger.warning(
+                    "Failed to scrape section '%s' for %s: %s",
+                    section_name,
+                    username,
+                    e,
+                )
+                failed_sections[section_name] = str(e)
+                continue
 
             if content.html:
                 try:
-                    parsed_sections[section_name] = parse_section(
-                        section_name,
-                        content.html,
-                        entity_type="person",
-                        include_raw=self._debug,
-                    )
-                except NotImplementedError:
+                    try:
+                        parsed_sections[section_name] = parse_section(
+                            section_name,
+                            content.html,
+                            entity_type="person",
+                            include_raw=self._debug,
+                        )
+                    except NotImplementedError:
+                        logger.warning(
+                            "Parser not implemented for section '%s', using generic",
+                            section_name,
+                        )
+                        parsed_sections[section_name] = parse_generic(
+                            content.html, include_raw=self._debug
+                        )
+                except Exception as e:
                     logger.warning(
-                        "Parser not implemented for section '%s', using generic",
+                        "Failed to parse section '%s' for %s: %s",
                         section_name,
+                        username,
+                        e,
                     )
-                    parsed_sections[section_name] = parse_generic(
-                        content.html, include_raw=self._debug
-                    )
+                    failed_sections[section_name] = f"Parse error: {e}"
 
         return ScrapeResponse(
             url=f"{base_url}/",
             sections=parsed_sections,
             unknown_sections=unknown,
+            failed_sections=failed_sections,
         )

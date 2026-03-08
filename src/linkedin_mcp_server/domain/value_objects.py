@@ -31,7 +31,7 @@ class BrowserConfig:
     user_agent: str | None = None
     viewport_width: int = 1280
     viewport_height: int = 720
-    default_timeout: int = 5000
+    default_timeout: int = 10000
     chrome_path: str | None = None
     user_data_dir: str = "~/.linkedin-mcp-server/browser-data"
 

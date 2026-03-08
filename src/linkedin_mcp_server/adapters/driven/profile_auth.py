@@ -3,6 +3,7 @@
 import asyncio
 import contextlib
 import logging
+import random
 import shutil
 from pathlib import Path
 
@@ -32,11 +33,27 @@ _AUTHENTICATED_PAGE_PATTERNS = [
     "/notifications",
 ]
 
-_WARM_UP_SITES = [
+_WARM_UP_POOL = [
+    "https://www.google.com",
     "https://www.bing.com",
     "https://www.reddit.com",
     "https://www.stackoverflow.com",
+    "https://www.wikipedia.org",
+    "https://www.github.com",
+    "https://www.amazon.com",
+    "https://www.youtube.com",
+    "https://www.nytimes.com",
+    "https://www.bbc.com",
+    "https://www.medium.com",
+    "https://news.ycombinator.com",
+    "https://www.cnn.com",
+    "https://www.weather.com",
+    "https://www.imdb.com",
+    "https://www.espn.com",
 ]
+
+_MIN_WARM_UP_SITES = 5
+_MAX_WARM_UP_SITES = 7
 
 
 class ProfileAuthAdapter(AuthPort):
@@ -89,7 +106,15 @@ class ProfileAuthAdapter(AuthPort):
             await self._warm_up()
 
         print("  Navigating to LinkedIn login page...")
-        await self._browser.navigate("https://www.linkedin.com/login")
+        await asyncio.sleep(random.uniform(1.0, 3.0))
+
+        try:
+            await self._browser.navigate("https://www.linkedin.com/login")
+        except Exception as e:
+            logger.error("Failed to navigate to LinkedIn login: %s", e)
+            raise AuthenticationError(
+                f"Could not open LinkedIn login page: {e}"
+            ) from e
 
         print(
             f"  Waiting for login (up to {_LOGIN_TIMEOUT_S // 60} minutes)...\n"
@@ -111,11 +136,18 @@ class ProfileAuthAdapter(AuthPort):
         return True
 
     async def _warm_up(self) -> None:
-        """Visit normal sites to appear more human-like before LinkedIn access."""
-        for site in _WARM_UP_SITES:
+        """Visit random popular sites to build a natural browsing fingerprint."""
+        count = random.randint(_MIN_WARM_UP_SITES, _MAX_WARM_UP_SITES)
+        sites = random.sample(_WARM_UP_POOL, min(count, len(_WARM_UP_POOL)))
+
+        for i, site in enumerate(sites, 1):
+            logger.info("Warm-up %d/%d: visiting %s", i, len(sites), site)
+            print(f"  Warm-up {i}/{len(sites)}: visiting {site}")
             with contextlib.suppress(Exception):
                 await self._browser.navigate(site)
-                await asyncio.sleep(1)
+                await asyncio.sleep(random.uniform(1.0, 3.0))
+
+        logger.info("Warm-up complete (%d sites visited)", len(sites))
 
     async def _poll_for_login(self) -> bool:
         """Poll the current URL until login is detected or timeout expires."""

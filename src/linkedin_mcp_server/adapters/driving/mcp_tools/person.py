@@ -43,6 +43,8 @@ def register_person_tools(
             }
             if result.unknown_sections:
                 response["unknown_sections"] = result.unknown_sections
+            if result.failed_sections:
+                response["failed_sections"] = result.failed_sections
             return response
         except Exception as e:
             map_domain_error(e, "get_person_profile")

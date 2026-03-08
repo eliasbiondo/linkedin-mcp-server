@@ -11,6 +11,7 @@ class ScrapeResponse:
     url: str
     sections: dict[str, Any] = field(default_factory=dict)
     unknown_sections: list[str] = field(default_factory=list)
+    failed_sections: dict[str, str] = field(default_factory=dict)
 
 
 @dataclass

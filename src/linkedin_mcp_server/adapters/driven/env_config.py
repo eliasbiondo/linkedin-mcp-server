@@ -49,7 +49,7 @@ class EnvConfigAdapter(ConfigPort):
             user_agent=os.environ.get("LINKEDIN_USER_AGENT"),
             viewport_width=self._get_int("LINKEDIN_VIEWPORT_WIDTH", 1280),
             viewport_height=self._get_int("LINKEDIN_VIEWPORT_HEIGHT", 720),
-            default_timeout=self._get_int("LINKEDIN_TIMEOUT", 5000),
+            default_timeout=self._get_int("LINKEDIN_TIMEOUT", 10000),
             chrome_path=os.environ.get("LINKEDIN_CHROME_PATH"),
             user_data_dir=os.environ.get(
                 "LINKEDIN_USER_DATA_DIR", "~/.linkedin-mcp-server/browser-data"
