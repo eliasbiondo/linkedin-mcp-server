@@ -6,6 +6,7 @@ from typing import Any
 
 from linkedin_mcp_server.domain.exceptions import (
     AuthenticationError,
+    NetworkError,
     RateLimitError,
 )
 from linkedin_mcp_server.domain.models.responses import ScrapeResponse
@@ -62,7 +63,7 @@ class ScrapeCompanyUseCase:
 
             try:
                 content = await self._browser.extract_page_html(url)
-            except (RateLimitError, AuthenticationError):
+            except (RateLimitError, AuthenticationError, NetworkError):
                 raise
             except Exception as e:
                 logger.warning(
