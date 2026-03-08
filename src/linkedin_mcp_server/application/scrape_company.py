@@ -4,6 +4,10 @@ import asyncio
 import logging
 from typing import Any
 
+from linkedin_mcp_server.domain.exceptions import (
+    AuthenticationError,
+    RateLimitError,
+)
 from linkedin_mcp_server.domain.models.responses import ScrapeResponse
 from linkedin_mcp_server.domain.parsers import (
     COMPANY_SECTIONS,
@@ -58,6 +62,8 @@ class ScrapeCompanyUseCase:
 
             try:
                 content = await self._browser.extract_page_html(url)
+            except (RateLimitError, AuthenticationError):
+                raise
             except Exception as e:
                 logger.warning(
                     "Failed to scrape section '%s' for %s: %s",
@@ -70,20 +76,29 @@ class ScrapeCompanyUseCase:
 
             if content.html:
                 try:
-                    parsed_sections[section_name] = parse_section(
-                        section_name,
-                        content.html,
-                        entity_type="company",
-                        include_raw=self._debug,
-                    )
-                except NotImplementedError:
+                    try:
+                        parsed_sections[section_name] = parse_section(
+                            section_name,
+                            content.html,
+                            entity_type="company",
+                            include_raw=self._debug,
+                        )
+                    except NotImplementedError:
+                        logger.warning(
+                            "Parser not implemented for section '%s', using generic",
+                            section_name,
+                        )
+                        parsed_sections[section_name] = parse_generic(
+                            content.html, include_raw=self._debug
+                        )
+                except Exception as e:
                     logger.warning(
-                        "Parser not implemented for section '%s', using generic",
+                        "Failed to parse section '%s' for %s: %s",
                         section_name,
+                        company_name,
+                        e,
                     )
-                    parsed_sections[section_name] = parse_generic(
-                        content.html, include_raw=self._debug
-                    )
+                    failed_sections[section_name] = f"Parse error: {e}"
 
         return ScrapeResponse(
             url=f"{base_url}/",

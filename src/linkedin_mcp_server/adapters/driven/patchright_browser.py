@@ -129,12 +129,7 @@ class PatchrightBrowserAdapter(BrowserPort):
     async def extract_page_html(self, url: str) -> PageContent:
         """Navigate, scroll, extract <main> innerHTML."""
         page = await self._ensure_browser()
-
-        try:
-            await page.goto(url, wait_until="domcontentloaded")
-        except Exception as e:
-            logger.error("Page navigation failed for %s: %s", url, e)
-            raise NetworkError(f"Navigation failed: {url}") from e
+        await self.navigate(url)
 
         await self._detect_rate_limit(page)
         await self._handle_modal_close(page)
@@ -153,15 +148,13 @@ class PatchrightBrowserAdapter(BrowserPort):
     async def extract_overlay_html(self, url: str) -> PageContent:
         """Navigate, wait for dialog/modal, extract overlay innerHTML."""
         page = await self._ensure_browser()
+        await self.navigate(url)
 
         try:
-            await page.goto(url, wait_until="domcontentloaded")
-        except Exception as e:
-            logger.error("Overlay navigation failed for %s: %s", url, e)
-            raise NetworkError(f"Navigation failed: {url}") from e
-
-        try:
-            await page.wait_for_selector('[role="dialog"]', timeout=10000)
+            await page.wait_for_selector(
+                '[role="dialog"]',
+                timeout=self._config.default_timeout,
+            )
         except Exception:
             logger.warning("Overlay dialog not found for %s", url)
 
@@ -177,12 +170,7 @@ class PatchrightBrowserAdapter(BrowserPort):
     async def extract_search_page_html(self, url: str) -> PageContent:
         """Navigate, scroll job sidebar, extract search results HTML."""
         page = await self._ensure_browser()
-
-        try:
-            await page.goto(url, wait_until="domcontentloaded")
-        except Exception as e:
-            logger.error("Search page navigation failed for %s: %s", url, e)
-            raise NetworkError(f"Navigation failed: {url}") from e
+        await self.navigate(url)
 
         await self._detect_rate_limit(page)
         await self._handle_modal_close(page)
