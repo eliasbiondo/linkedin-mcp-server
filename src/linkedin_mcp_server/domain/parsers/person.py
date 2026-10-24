@@ -67,6 +67,86 @@ def _extract_description(entity: Tag) -> str | None:
     return "\n".join(lines) if lines else None
 
 
+# ── Followers / connections ─────────────────────────────────────────────────
+
+_DIGIT_RE = re.compile(r"\d")
+# LinkedIn caps the displayed connection count at "500+"; follower counts
+# are shown exactly, so a trailing "+" identifies connections in any locale.
+_CAPPED_COUNT_RE = re.compile(r"\d\s*\+")
+# Link targets are locale-independent even when the visible label is not.
+_FOLLOWERS_HREF_HINTS = ("follower",)
+_CONNECTIONS_HREF_HINTS = ("/mynetwork/", "connectionof", "network=")
+
+
+def _network_count_kind(item: Tag, txt: str) -> str | None:
+    """Classify a top-card count item as "followers", "connections" or None.
+
+    Uses locale-independent signals first (link targets, the "500+" cap),
+    then English keywords as a hint. Returns None when undecidable so the
+    caller can fall back to position.
+    """
+    for link in item.find_all("a", href=True):
+        href = str(link["href"]).lower()
+        if any(hint in href for hint in _FOLLOWERS_HREF_HINTS):
+            return "followers"
+        if any(hint in href for hint in _CONNECTIONS_HREF_HINTS):
+            return "connections"
+
+    lower = txt.lower()
+    if "follower" in lower:
+        return "followers"
+    if "connection" in lower or _CAPPED_COUNT_RE.search(txt):
+        return "connections"
+    return None
+
+
+def _split_followers_connections(items: list[Tag]) -> tuple[str | None, str | None]:
+    """Split top-card count items into (followers, connections).
+
+    The split does not depend on the UI language. Only items with a number
+    are considered, and only those in one list (the top card's: the first
+    list holding an explicitly identified count, else the first list with
+    any count), so numbers elsewhere on the page are never picked up.
+    Explicit signals are used when present and anything left over is
+    assigned by position: LinkedIn lists followers before connections, and a
+    lone unidentified count is assumed to be the connection count.
+    """
+    candidates: list[tuple[Tag, str, str | None]] = []
+    for item in items:
+        txt = text(item)
+        if txt and _DIGIT_RE.search(txt):
+            candidates.append((item, txt, _network_count_kind(item, txt)))
+    if not candidates:
+        return None, None
+
+    anchor = next((c for c in candidates if c[2] is not None), candidates[0])
+    top_list = anchor[0].find_parent("ul")
+
+    followers: str | None = None
+    connections: str | None = None
+    unresolved: list[str] = []
+
+    for item, txt, kind in candidates:
+        if item.find_parent("ul") is not top_list:
+            continue
+        if kind == "followers" and followers is None:
+            followers = txt
+        elif kind == "connections" and connections is None:
+            connections = txt
+        else:
+            unresolved.append(txt)
+
+    if followers is None and connections is None and len(unresolved) >= 2:
+        followers, connections = unresolved[0], unresolved[1]
+    elif unresolved:
+        if connections is None:
+            connections = unresolved[0]
+        elif followers is None:
+            followers = unresolved[0]
+
+    return followers, connections
+
+
 # ── Main profile parser ─────────────────────────────────────────────────────
 
 
@@ -108,24 +188,18 @@ def parse_person_main_profile(html: str, *, include_raw: bool = False) -> Person
         for span in s.find_all("span", class_=lambda c: c and "text-body-small" in c):
             classes = span.get("class", [])
             if "t-black--light" in classes and "break-words" in classes and "inline" in classes:
+                # Skip the followers/connections list, whatever the UI language
+                if span.find_parent("ul") is not None:
+                    continue
                 txt = text(span)
                 if txt and "follower" not in txt.lower() and "connection" not in txt.lower():
                     location = txt
                     break
 
     # ── Followers & Connections ───────────────────────────────────────────
-    followers: str | None = None
-    connections: str | None = None
-
-    for li in s.find_all("li", class_=lambda c: c and "text-body-small" in c):
-        txt = text(li)
-        if not txt:
-            continue
-        lower = txt.lower()
-        if "follower" in lower:
-            followers = txt
-        elif "connection" in lower:
-            connections = txt
+    followers, connections = _split_followers_connections(
+        s.find_all("li", class_=lambda c: c and "text-body-small" in c)
+    )
 
     # ── About ─────────────────────────────────────────────────────────────
     about: str | None = None

@@ -10,7 +10,7 @@ from linkedin_mcp_server.domain.exceptions import (
     RateLimitError,
 )
 from linkedin_mcp_server.domain.models.responses import ScrapeResponse
-from linkedin_mcp_server.domain.parsers import parse_section
+from linkedin_mcp_server.domain.parsers import parse_section, unsupported_layout_reason
 from linkedin_mcp_server.domain.parsers.person import parse_generic
 from linkedin_mcp_server.domain.value_objects import SectionConfig
 from linkedin_mcp_server.ports.auth import AuthPort
@@ -43,7 +43,8 @@ async def scrape_sections(
     3. Navigate to each section URL (with inter-page delay)
     4. Extract HTML (page or overlay)
     5. Parse the HTML with the appropriate registered parser (or fallback)
-    6. Accumulate results, tracking any sections that failed
+    6. Accumulate results, tracking any sections that failed (including
+       sections whose page came back empty or in an unsupported layout)
 
     Args:
         browser: BrowserPort implementation
@@ -89,29 +90,50 @@ async def scrape_sections(
             failed_sections[section_name] = str(e)
             continue
 
-        if content.html:
+        if not content.html:
+            logger.warning(
+                "No content extracted for section '%s' for %s",
+                section_name,
+                entity_label,
+            )
+            failed_sections[section_name] = "No content extracted from page"
+            continue
+
+        try:
             try:
-                try:
-                    parsed_sections[section_name] = parse_section(
-                        section_name,
-                        content.html,
-                        entity_type=entity_type,
-                        include_raw=debug,
-                    )
-                except NotImplementedError:
-                    logger.warning(
-                        "Parser not implemented for section '%s', using generic",
-                        section_name,
-                    )
-                    parsed_sections[section_name] = parse_generic(content.html, include_raw=debug)
-            except Exception as e:
-                logger.warning(
-                    "Failed to parse section '%s' for %s: %s",
+                parsed = parse_section(
                     section_name,
-                    entity_label,
-                    e,
+                    content.html,
+                    entity_type=entity_type,
+                    include_raw=debug,
                 )
-                failed_sections[section_name] = f"Parse error: {e}"
+            except NotImplementedError:
+                logger.warning(
+                    "Parser not implemented for section '%s', using generic",
+                    section_name,
+                )
+                parsed = parse_generic(content.html, include_raw=debug)
+        except Exception as e:
+            logger.warning(
+                "Failed to parse section '%s' for %s: %s",
+                section_name,
+                entity_label,
+                e,
+            )
+            failed_sections[section_name] = f"Parse error: {e}"
+            continue
+
+        reason = unsupported_layout_reason(content.html, parsed)
+        if reason:
+            logger.warning(
+                "Unsupported (SDUI) layout for section '%s' for %s",
+                section_name,
+                entity_label,
+            )
+            failed_sections[section_name] = reason
+            continue
+
+        parsed_sections[section_name] = parsed
 
     return ScrapeResponse(
         url=f"{base_url}/",

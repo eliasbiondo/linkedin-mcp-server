@@ -1,12 +1,19 @@
 """Search for people on LinkedIn."""
 
+import logging
 from typing import Any
 from urllib.parse import quote_plus
 
 from linkedin_mcp_server.domain.models.responses import ScrapeResponse
-from linkedin_mcp_server.domain.parsers import parse_section
+from linkedin_mcp_server.domain.parsers import (
+    SDUI_EMPTY_SEARCH_MESSAGE,
+    parse_section,
+    unsupported_layout_reason,
+)
 from linkedin_mcp_server.ports.auth import AuthPort
 from linkedin_mcp_server.ports.browser import BrowserPort
+
+logger = logging.getLogger(__name__)
 
 
 class SearchPeopleUseCase:
@@ -32,12 +39,21 @@ class SearchPeopleUseCase:
         content = await self._browser.extract_page_html(url)
 
         sections: dict[str, Any] = {}
+        failed_sections: dict[str, str] = {}
         if content.html:
-            sections["search_results"] = parse_section(
+            parsed = parse_section(
                 "search_results",
                 content.html,
                 entity_type="search_people",
                 include_raw=self._debug,
             )
+            reason = unsupported_layout_reason(
+                content.html, parsed, message=SDUI_EMPTY_SEARCH_MESSAGE
+            )
+            if reason:
+                logger.warning("Unsupported (SDUI) layout for people search: %s", url)
+                failed_sections["search_results"] = reason
+            else:
+                sections["search_results"] = parsed
 
-        return ScrapeResponse(url=url, sections=sections)
+        return ScrapeResponse(url=url, sections=sections, failed_sections=failed_sections)
