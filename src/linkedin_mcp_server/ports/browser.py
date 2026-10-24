@@ -1,13 +1,31 @@
 """Browser port — abstracts all browser interaction."""
 
 from abc import ABC, abstractmethod
+from contextlib import AbstractAsyncContextManager
 from typing import Any
 
 from linkedin_mcp_server.domain.value_objects import PageContent
 
 
 class BrowserPort(ABC):
-    """Port for browser interaction (page navigation, HTML extraction, scrolling)."""
+    """Port for browser interaction (page navigation, HTML extraction, scrolling).
+
+    Implementations drive a single shared page, so concurrent callers must not
+    interleave. Every method is individually serialized; use ``exclusive()`` to
+    hold the browser across a multi-step logical operation.
+    """
+
+    @abstractmethod
+    def exclusive(self) -> AbstractAsyncContextManager[None]:
+        """Hold exclusive access to the browser for a multi-step operation.
+
+        Use this when a caller performs several browser calls that depend on
+        each other (e.g. navigate, then read state from the loaded page) so no
+        concurrent operation can navigate the page in between. Re-entrant
+        within the same task: browser methods called while it is held do not
+        deadlock.
+        """
+        ...
 
     @abstractmethod
     async def navigate(self, url: str, wait_until: str = "domcontentloaded") -> None:
