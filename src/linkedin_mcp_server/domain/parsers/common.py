@@ -8,6 +8,25 @@ from bs4 import BeautifulSoup, Tag
 
 JOB_VIEW_RE = re.compile(r"/jobs/view/(\d+)/?")
 
+# Markers of LinkedIn's server-driven UI ("SDUI") rendering: elements carry a
+# `componentkey` attribute and SDUI-specific attribute/asset names contain
+# "sdui". The legacy (Ember) markup the parsers target does not use these.
+_SDUI_MARKER_RE = re.compile(r"\bcomponentkey\s*=|sdui", re.IGNORECASE)
+
+# ── Layout detection ──────────────────────────────────────────────────────────
+
+
+def is_sdui_markup(html: str) -> bool:
+    """Return True if the HTML looks like LinkedIn's server-driven UI (SDUI).
+
+    The SDUI rendering uses hashed class names and none of the legacy hooks
+    (``<h1>``, ``pv-top-card``, ``text-body-medium``, ...) the parsers rely on,
+    so an empty parse of an SDUI page means "unsupported layout", not
+    "no data".
+    """
+    return bool(html) and _SDUI_MARKER_RE.search(html) is not None
+
+
 # ── Text extraction helpers ───────────────────────────────────────────────────
 
 

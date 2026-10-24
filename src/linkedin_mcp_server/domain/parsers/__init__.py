@@ -3,6 +3,7 @@
 Section registries and routing live here.
 """
 
+from dataclasses import fields
 from typing import Any
 
 from linkedin_mcp_server.domain.models.company import (
@@ -27,6 +28,7 @@ from linkedin_mcp_server.domain.models.search import (
     JobSearchResults,
     PeopleSearchResults,
 )
+from linkedin_mcp_server.domain.parsers.common import is_sdui_markup
 from linkedin_mcp_server.domain.parsers.company import (
     parse_company_about,
     parse_company_jobs,
@@ -151,6 +153,46 @@ def parse_section(
         parser = parse_generic
 
     return parser(html, include_raw=include_raw)
+
+
+# ── Layout support checks ─────────────────────────────────────────────────────
+
+_SDUI_ISSUE_URL = "https://github.com/eliasbiondo/linkedin-mcp-server/issues/7"
+
+SDUI_UNSUPPORTED_MESSAGE = (
+    "LinkedIn served this page with its new server-driven UI (SDUI) markup, which "
+    "the parser does not support yet, so no data could be extracted. Treat this "
+    f"section as missing, not empty. See {_SDUI_ISSUE_URL}"
+)
+
+SDUI_EMPTY_SEARCH_MESSAGE = (
+    "No results could be parsed from a search page LinkedIn served with its new "
+    "server-driven UI (SDUI) markup. This layout is not fully supported yet, so "
+    "results may be missing rather than genuinely empty. See "
+    f"{_SDUI_ISSUE_URL}"
+)
+
+
+def is_empty_section(section: ParsedSection) -> bool:
+    """Return True if a parsed model carries no data (ignoring the debug ``raw`` field)."""
+    return all(not getattr(section, f.name) for f in fields(section) if f.name != "raw")
+
+
+def unsupported_layout_reason(
+    html: str,
+    section: ParsedSection,
+    *,
+    message: str = SDUI_UNSUPPORTED_MESSAGE,
+) -> str | None:
+    """Explain an empty parse caused by a page layout the parsers do not support.
+
+    Returns ``message`` when the parser extracted nothing from a page rendered
+    with LinkedIn's SDUI markup, or None when the result should be trusted
+    as-is (data found, or a legacy page that is genuinely empty).
+    """
+    if is_empty_section(section) and is_sdui_markup(html):
+        return message
+    return None
 
 
 # ── Section validators ────────────────────────────────────────────────────────
