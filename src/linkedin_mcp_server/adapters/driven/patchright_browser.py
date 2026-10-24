@@ -5,10 +5,13 @@ rate limit detection, and HTML extraction.
 """
 
 import asyncio
+import functools
 import logging
 import random
+from collections.abc import AsyncIterator, Awaitable, Callable
+from contextlib import asynccontextmanager
 from pathlib import Path
-from typing import Any
+from typing import Any, Concatenate
 
 from patchright.async_api import (
     Browser,
@@ -48,35 +51,43 @@ _AUTH_REDIRECT_PATTERNS = [
 # when no custom user_agent is configured.
 _UA_CHROME = "AppleWebKit/537.36 (KHTML, like Gecko)"
 _USER_AGENT_POOL = [
-    (
-        "Mozilla/5.0 (Windows NT 10.0; Win64; x64) "
-        f"{_UA_CHROME} Chrome/131.0.0.0 Safari/537.36"
-    ),
+    (f"Mozilla/5.0 (Windows NT 10.0; Win64; x64) {_UA_CHROME} Chrome/131.0.0.0 Safari/537.36"),
     (
         "Mozilla/5.0 (Macintosh; Intel Mac OS X 10_15_7) "
         f"{_UA_CHROME} Chrome/131.0.0.0 Safari/537.36"
     ),
-    (
-        "Mozilla/5.0 (Windows NT 10.0; Win64; x64) "
-        f"{_UA_CHROME} Chrome/130.0.0.0 Safari/537.36"
-    ),
+    (f"Mozilla/5.0 (Windows NT 10.0; Win64; x64) {_UA_CHROME} Chrome/130.0.0.0 Safari/537.36"),
     (
         "Mozilla/5.0 (Macintosh; Intel Mac OS X 10_15_7) "
         f"{_UA_CHROME} Chrome/130.0.0.0 Safari/537.36"
     ),
-    (
-        "Mozilla/5.0 (X11; Linux x86_64) "
-        f"{_UA_CHROME} Chrome/131.0.0.0 Safari/537.36"
-    ),
-    (
-        "Mozilla/5.0 (X11; Linux x86_64) "
-        f"{_UA_CHROME} Chrome/130.0.0.0 Safari/537.36"
-    ),
+    (f"Mozilla/5.0 (X11; Linux x86_64) {_UA_CHROME} Chrome/131.0.0.0 Safari/537.36"),
+    (f"Mozilla/5.0 (X11; Linux x86_64) {_UA_CHROME} Chrome/130.0.0.0 Safari/537.36"),
 ]
 
 
+def _serialized[**P, R](
+    method: Callable[Concatenate["PatchrightBrowserAdapter", P], Awaitable[R]],
+) -> Callable[Concatenate["PatchrightBrowserAdapter", P], Awaitable[R]]:
+    """Run an adapter method while holding the browser's exclusive lock."""
+
+    @functools.wraps(method)
+    async def wrapper(self: "PatchrightBrowserAdapter", *args: P.args, **kwargs: P.kwargs) -> R:
+        async with self.exclusive():
+            return await method(self, *args, **kwargs)
+
+    return wrapper
+
+
 class PatchrightBrowserAdapter(BrowserPort):
-    """BrowserPort implementation using Patchright persistent browser."""
+    """BrowserPort implementation using Patchright persistent browser.
+
+    A single ``Page`` is shared by every caller, so all page-touching methods
+    are serialized through one lock. The lock is re-entrant per asyncio task:
+    a method that calls another (e.g. ``extract_page_html`` -> ``navigate``) or
+    a use case holding ``exclusive()`` across several calls does not deadlock,
+    while a concurrent task waits until the holder is done.
+    """
 
     def __init__(self, config: BrowserConfig):
         self._config = config
@@ -84,6 +95,23 @@ class PatchrightBrowserAdapter(BrowserPort):
         self._browser: Browser | None = None
         self._context: BrowserContext | None = None
         self._page: Page | None = None
+        self._lock = asyncio.Lock()
+        self._lock_owner: asyncio.Task[Any] | None = None
+
+    @asynccontextmanager
+    async def exclusive(self) -> AsyncIterator[None]:
+        """Hold exclusive access to the shared page (re-entrant per task)."""
+        task = asyncio.current_task()
+        if task is not None and self._lock_owner is task:
+            yield
+            return
+
+        async with self._lock:
+            self._lock_owner = task
+            try:
+                yield
+            finally:
+                self._lock_owner = None
 
     async def _ensure_browser(self) -> Page:
         """Lazy-initialize the browser on first use."""
@@ -129,6 +157,7 @@ class PatchrightBrowserAdapter(BrowserPort):
 
     # ── BrowserPort implementation ────────────────────────────────────────────
 
+    @_serialized
     async def navigate(self, url: str, wait_until: str = "domcontentloaded") -> None:
         page = await self._ensure_browser()
         last_error: Exception | None = None
@@ -154,6 +183,7 @@ class PatchrightBrowserAdapter(BrowserPort):
 
         raise NetworkError(f"Navigation failed after 3 attempts: {url}") from last_error
 
+    @_serialized
     async def extract_page_html(self, url: str) -> PageContent:
         """Navigate, scroll, extract <main> innerHTML."""
         page = await self._ensure_browser()
@@ -173,6 +203,7 @@ class PatchrightBrowserAdapter(BrowserPort):
 
         return PageContent(url=page.url, html=html or "")
 
+    @_serialized
     async def extract_overlay_html(self, url: str) -> PageContent:
         """Navigate, wait for dialog/modal, extract overlay innerHTML."""
         page = await self._ensure_browser()
@@ -195,6 +226,7 @@ class PatchrightBrowserAdapter(BrowserPort):
 
         return PageContent(url=page.url, html=html or "")
 
+    @_serialized
     async def extract_search_page_html(self, url: str) -> PageContent:
         """Navigate, scroll job sidebar, extract search results HTML."""
         page = await self._ensure_browser()
@@ -214,6 +246,7 @@ class PatchrightBrowserAdapter(BrowserPort):
 
         return PageContent(url=page.url, html=html or "")
 
+    @_serialized
     async def extract_job_ids(self) -> list[str]:
         """Extract job IDs from the currently loaded job search page."""
         page = await self._ensure_browser()
@@ -241,6 +274,7 @@ class PatchrightBrowserAdapter(BrowserPort):
             logger.warning("Failed to extract job IDs: %s", e)
             return []
 
+    @_serialized
     async def get_total_search_pages(self) -> int | None:
         """Read total page count from LinkedIn pagination."""
         page = await self._ensure_browser()
@@ -262,10 +296,12 @@ class PatchrightBrowserAdapter(BrowserPort):
         except Exception:
             return None
 
+    @_serialized
     async def get_current_url(self) -> str:
         page = await self._ensure_browser()
         return page.url
 
+    @_serialized
     async def get_cookies(self, urls: list[str] | None = None) -> list[dict[str, Any]]:
         """Return cookies from the browser context."""
         if not self._context:
@@ -281,6 +317,7 @@ class PatchrightBrowserAdapter(BrowserPort):
             logger.warning("Failed to read cookies: %s", e)
             return []
 
+    @_serialized
     async def add_cookies(self, cookies: list[dict[str, Any]]) -> None:
         """Add cookies to the browser context."""
         if not self._context:
@@ -293,6 +330,7 @@ class PatchrightBrowserAdapter(BrowserPort):
         """Check if the browser instance is running and usable."""
         return self._page is not None and self._context is not None
 
+    @_serialized
     async def close(self) -> None:
         """Close browser and release resources. Browser can be re-initialized later."""
         if self._context:

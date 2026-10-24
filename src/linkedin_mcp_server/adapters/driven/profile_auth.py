@@ -149,6 +149,12 @@ class ProfileAuthAdapter(AuthPort):
 
         Returns True if login was successful.
         """
+        # Hold the browser for the whole flow: we navigate, then poll the
+        # current URL, so no other operation may drive the page meanwhile.
+        async with self._browser.exclusive():
+            return await self._login_interactive(warm_up=warm_up)
+
+    async def _login_interactive(self, warm_up: bool) -> bool:
         if warm_up:
             print("  Warming up browser...")
             await self._warm_up()
@@ -203,8 +209,7 @@ class ProfileAuthAdapter(AuthPort):
             # Filter to LinkedIn cookies only
             # Handle both "linkedin.com" and ".linkedin.com" domains
             linkedin_cookies = [
-                c for c in cookies
-                if (c.get("domain") or "").lstrip(".").endswith("linkedin.com")
+                c for c in cookies if (c.get("domain") or "").lstrip(".").endswith("linkedin.com")
             ]
 
             if not linkedin_cookies:
@@ -318,8 +323,11 @@ class ProfileAuthAdapter(AuthPort):
     async def _check_via_navigation(self) -> bool:
         """Navigate to LinkedIn feed and check if we land on an authenticated page."""
         try:
-            await self._browser.navigate("https://www.linkedin.com/feed/")
-            url = await self._browser.get_current_url()
+            # Navigate and read the resulting URL atomically, so a concurrent
+            # navigation cannot change the page between the two steps.
+            async with self._browser.exclusive():
+                await self._browser.navigate("https://www.linkedin.com/feed/")
+                url = await self._browser.get_current_url()
 
             # Fail-fast on auth blocker URLs
             if any(pattern in url for pattern in _AUTH_BLOCKER_PATTERNS):

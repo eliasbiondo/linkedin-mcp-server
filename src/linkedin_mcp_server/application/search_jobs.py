@@ -72,60 +72,61 @@ class SearchJobsUseCase:
         easy_apply: bool = False,
         sort_by: str | None = None,
     ) -> JobSearchResponse:
-        await self._auth.ensure_authenticated()
+        async with self._browser.exclusive():
+            await self._auth.ensure_authenticated()
 
-        base_url = self._build_search_url(
-            keywords=keywords,
-            location=location,
-            date_posted=date_posted,
-            job_type=job_type,
-            experience_level=experience_level,
-            work_type=work_type,
-            easy_apply=easy_apply,
-            sort_by=sort_by,
-        )
+            base_url = self._build_search_url(
+                keywords=keywords,
+                location=location,
+                date_posted=date_posted,
+                job_type=job_type,
+                experience_level=experience_level,
+                work_type=work_type,
+                easy_apply=easy_apply,
+                sort_by=sort_by,
+            )
 
-        all_job_ids: list[str] = []
-        seen_ids: set[str] = set()
-        sections: dict[str, Any] = {}
+            all_job_ids: list[str] = []
+            seen_ids: set[str] = set()
+            sections: dict[str, Any] = {}
 
-        max_pages = max(1, min(max_pages, 10))
+            max_pages = max(1, min(max_pages, 10))
 
-        for page_num in range(max_pages):
-            page_url = base_url if page_num == 0 else f"{base_url}&start={page_num * 25}"
+            for page_num in range(max_pages):
+                page_url = base_url if page_num == 0 else f"{base_url}&start={page_num * 25}"
 
-            if page_num > 0:
-                await asyncio.sleep(NAV_DELAY)
+                if page_num > 0:
+                    await asyncio.sleep(NAV_DELAY)
 
-            content = await self._browser.extract_search_page_html(page_url)
+                content = await self._browser.extract_search_page_html(page_url)
 
-            # Extract job IDs from the loaded page
-            page_job_ids = await self._browser.extract_job_ids()
-            for jid in page_job_ids:
-                if jid not in seen_ids:
-                    seen_ids.add(jid)
-                    all_job_ids.append(jid)
+                # Extract job IDs from the loaded page
+                page_job_ids = await self._browser.extract_job_ids()
+                for jid in page_job_ids:
+                    if jid not in seen_ids:
+                        seen_ids.add(jid)
+                        all_job_ids.append(jid)
 
-            if content.html:
-                parsed = parse_section(
-                    "search_results",
-                    content.html,
-                    entity_type="search_jobs",
-                    include_raw=self._debug,
-                )
-                sections[f"page_{page_num + 1}"] = parsed
+                if content.html:
+                    parsed = parse_section(
+                        "search_results",
+                        content.html,
+                        entity_type="search_jobs",
+                        include_raw=self._debug,
+                    )
+                    sections[f"page_{page_num + 1}"] = parsed
 
-            # Check if there are more pages
-            if page_num == 0:
-                total_pages = await self._browser.get_total_search_pages()
-                if total_pages is not None:
-                    max_pages = min(max_pages, total_pages)
+                # Check if there are more pages
+                if page_num == 0:
+                    total_pages = await self._browser.get_total_search_pages()
+                    if total_pages is not None:
+                        max_pages = min(max_pages, total_pages)
 
-        return JobSearchResponse(
-            url=base_url,
-            sections=sections,
-            job_ids=all_job_ids,
-        )
+            return JobSearchResponse(
+                url=base_url,
+                sections=sections,
+                job_ids=all_job_ids,
+            )
 
     @staticmethod
     def _build_search_url(

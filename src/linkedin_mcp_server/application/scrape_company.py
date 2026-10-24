@@ -26,14 +26,18 @@ class ScrapeCompanyUseCase:
         requested, unknown = parse_company_sections(sections)
         requested = set(COMPANY_SECTIONS.keys()) if not requested else requested | {"about"}
 
-        return await scrape_sections(
-            browser=self._browser,
-            auth=self._auth,
-            debug=self._debug,
-            base_url=f"https://www.linkedin.com/company/{company_name}",
-            entity_type="company",
-            sections_registry=COMPANY_SECTIONS,
-            requested=requested,
-            unknown=unknown,
-            entity_label=company_name,
-        )
+        # Hold the browser for the whole profile (auth check + every section)
+        # so concurrent tool calls cannot interleave navigations on the shared
+        # page, and the inter-section delay keeps pacing requests as intended.
+        async with self._browser.exclusive():
+            return await scrape_sections(
+                browser=self._browser,
+                auth=self._auth,
+                debug=self._debug,
+                base_url=f"https://www.linkedin.com/company/{company_name}",
+                entity_type="company",
+                sections_registry=COMPANY_SECTIONS,
+                requested=requested,
+                unknown=unknown,
+                entity_label=company_name,
+            )
